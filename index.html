@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cassino</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 12px 24px;
+    background: #123024;
+    font-family: system-ui, sans-serif;
+    color: #eef7ee;
+    box-sizing: border-box;
+  }
+  h1 {
+    margin: 4px 0 0;
+    font-size: 1.3rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #d9f2c4;
+  }
+  #status {
+    min-height: 1.4em;
+    font-size: 1rem;
+    text-align: center;
+  }
+  #score {
+    font-size: 0.9rem;
+    opacity: 0.85;
+  }
+  .row {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+    min-height: 92px;
+    align-items: center;
+  }
+  .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+    margin-top: 6px;
+  }
+  #table-area {
+    background: #0c2118;
+    border: 2px solid #2f5b3f;
+    border-radius: 10px;
+    padding: 10px;
+    width: min(94vw, 640px);
+    box-sizing: border-box;
+  }
+  .card {
+    width: 52px;
+    height: 74px;
+    border-radius: 6px;
+    background: #fbf8ee;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.05rem;
+    line-height: 1.05;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    user-select: none;
+  }
+  .card.red { color: #c22; }
+  .card.pick { outline: 3px solid #f2c94c; cursor: pointer; }
+  .card.selected { outline: 3px solid #6ee7b7; transform: translateY(-6px); }
+  .card.playable { cursor: pointer; }
+  .card.dim { opacity: 0.45; }
+  #hand .card { width: 58px; height: 82px; font-size: 1.15rem; }
+  #controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  button {
+    background: #2f5b3f;
+    color: #eef7ee;
+    border: 1px solid #4c8a63;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  button:hover:not(:disabled) { background: #3d7550; }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.7);
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay[hidden] { display: none; }
+  #overlay .box {
+    background: #123024;
+    border: 2px solid #4c8a63;
+    border-radius: 10px;
+    padding: 24px 30px;
+    max-width: 380px;
+  }
+</style>
+</head>
+<body>
+  <h1>Cassino</h1>
+  <div id="score">You: <span id="s0">0</span> pts &nbsp;|&nbsp; Computer: <span id="s1">0</span> pts</div>
+  <div id="status">Dealing...</div>
+
+  <div id="table-area">
+    <div class="label">Computer's hand</div>
+    <div class="row" id="opp-hand"></div>
+    <div class="label">Table</div>
+    <div class="row" id="table"></div>
+    <div class="label">Your hand</div>
+    <div class="row" id="hand"></div>
+  </div>
+
+  <div id="controls">
+    <button id="play-btn" disabled>Play selected card</button>
+    <button id="clear-btn" disabled>Clear selection</button>
+    <button id="new-btn">New deal</button>
+  </div>
+
+  <div id="overlay" hidden>
+    <div class="box">
+      <p id="overlay-text"></p>
+      <button id="overlay-btn">OK</button>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- rules (mirrors casino.py) -----------------------------------------
+
+  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  const VALUE = {};
+  RANKS.forEach((r, i) => VALUE[r] = i + 1);
+  const SUITS = ["S", "H", "D", "C"];
+  const ALL = [];
+  for (const s of SUITS) for (const r of RANKS) ALL.push(r + s);
+
+  function rankOf(card) { return card.slice(0, -1); }
+  function suitOf(card) { return card.slice(-1); }
+  function value(card) { return VALUE[rankOf(card)]; }
+
+  function newDeal(deck, first) {
+    first = first || 0;
+    const hands = [[], []];
+    hands[first] = deck.slice(0, 3);
+    hands[1 - first] = deck.slice(3, 6);
+    return {
+      hands,
+      table: deck.slice(6, 10),
+      talon: deck.slice(10),
+      piles: [[], []],
+      sweeps: [0, 0],
+      player: first,
+      lastCapturer: first,
+    };
+  }
+
+  function sum(cards) { return cards.reduce((a, c) => a + value(c), 0); }
+
+  function tableSubsetsSummingTo(table, target) {
+    const found = [];
+    const chosen = [];
+    function search(i, remaining) {
+      if (remaining === 0 && chosen.length) { found.push(chosen.slice()); return; }
+      if (i >= table.length || remaining <= 0) return;
+      const v = value(table[i]);
+      if (v <= remaining) {
+        chosen.push(table[i]);
+        search(i + 1, remaining - v);
+        chosen.pop();
+      }
+      search(i + 1, remaining);
+    }
+    search(0, target);
+    return found;
+  }
+
+  function combinations(arr, size) {
+    const results = [];
+    function rec(start, combo) {
+      if (combo.length === size) { results.push(combo.slice()); return; }
+      for (let i = start; i < arr.length; i++) {
+        combo.push(arr[i]);
+        rec(i + 1, combo);
+        combo.pop();
+      }
+    }
+    rec(0, []);
+    return results;
+  }
+
+  function legalMoves(state) {
+    const hand = state.hands[state.player];
+    const table = state.table;
+    const moves = hand.map(c => ({ hand: [c], table: [] }));
+    for (let size = 1; size <= hand.length; size++) {
+      for (const combo of combinations(hand, size)) {
+        const target = sum(combo);
+        for (const subset of tableSubsetsSummingTo(table, target)) {
+          moves.push({ hand: combo, table: subset });
+        }
+      }
+    }
+    return moves;
+  }
+
+  function without(arr, remove) {
+    const rm = new Set(remove);
+    return arr.filter(c => !rm.has(c));
+  }
+
+  function play(state, move) {
+    const player = state.player;
+    const hand = state.hands[player];
+    const handSet = new Set(hand);
+    if (!move.hand.length || !move.hand.every(c => handSet.has(c))) {
+      throw new Error("you do not hold those cards");
+    }
+    if (move.table.length) {
+      const tableSet = new Set(state.table);
+      if (!move.table.every(c => tableSet.has(c))) throw new Error("those cards are not on the table");
+      if (sum(move.hand) !== sum(move.table)) throw new Error("that does not add up");
+    } else if (move.hand.length !== 1) {
+      throw new Error("place exactly one card");
+    }
+
+    const tableWasEmpty = state.table.length === 0;
+    const hands = state.hands.map(h => h.slice());
+    hands[player] = without(hand, move.hand);
+
+    const piles = state.piles.map(p => p.slice());
+    const sweeps = state.sweeps.slice();
+    let lastCapturer = state.lastCapturer;
+    let table;
+
+    if (move.table.length) {
+      table = without(state.table, move.table);
+      piles[player] = piles[player].concat(move.hand.slice().sort(), move.table.slice().sort());
+      lastCapturer = player;
+      if (!table.length) sweeps[player] += 1;
+    } else {
+      table = state.table.concat(move.hand);
+    }
+
+    let nextPlayer = tableWasEmpty ? player : 1 - player;
+    let talon = state.talon;
+
+    if (!hands[nextPlayer].length && talon.length) {
+      if (!hands[1 - nextPlayer].length) {
+        const dealt = {};
+        dealt[lastCapturer] = talon.slice(0, 3);
+        dealt[1 - lastCapturer] = talon.slice(3, 6);
+        hands[0] = dealt[0]; hands[1] = dealt[1];
+        talon = talon.slice(6);
+        nextPlayer = lastCapturer;
+      } else {
+        const n = Math.min(3, talon.length);
+        hands[nextPlayer] = talon.slice(0, n);
+        talon = talon.slice(n);
+      }
+    }
+
+    if (!hands[0].length && !hands[1].length && !talon.length) {
+      if (table.length) {
+        piles[lastCapturer] = piles[lastCapturer].concat(table.slice().sort());
+        table = [];
+      }
+    } else if (!hands[nextPlayer].length) {
+      nextPlayer = 1 - nextPlayer;
+    }
+
+    return { hands, table, talon, piles, sweeps, player: nextPlayer, lastCapturer };
+  }
+
+  function dealOver(state) {
+    return !state.hands[0].length && !state.hands[1].length && !state.talon.length;
+  }
+
+  function score(state) {
+    const points = [];
+    for (const p of [0, 1]) {
+      const pile = state.piles[p];
+      let pts = 0;
+      if (pile.length >= 27) pts += 3;
+      if (pile.filter(c => suitOf(c) === "S").length >= 7) pts += 2;
+      pts += pile.filter(c => rankOf(c) === "A").length;
+      if (pile.includes("10D")) pts += 2;
+      if (pile.includes("2S")) pts += 1;
+      pts += state.sweeps[p];
+      points.push(pts);
+    }
+    return points;
+  }
+
+  // ---- computer strategy --------------------------------------------------
+
+  function computerChoose(state) {
+    const moves = legalMoves(state);
+    const captures = moves.filter(m => m.table.length);
+    if (captures.length) {
+      captures.sort((a, b) => {
+        if (b.table.length !== a.table.length) return b.table.length - a.table.length;
+        return sum(b.hand) - sum(a.hand);
+      });
+      return captures[0];
+    }
+    const places = moves.filter(m => !m.table.length);
+    places.sort((a, b) => value(a.hand[0]) - value(b.hand[0]));
+    return places[0];
+  }
+
+  // ---- rendering -----------------------------------------------------------
+
+  const SUIT_SYMBOL = { S: "♠", H: "♥", D: "♦", C: "♣" };
+
+  function cardEl(card, extraClass) {
+    const el = document.createElement("div");
+    el.className = "card" + (suitOf(card) === "H" || suitOf(card) === "D" ? " red" : "");
+    if (extraClass) el.className += " " + extraClass;
+    el.innerHTML = `<div>${rankOf(card)}</div><div>${SUIT_SYMBOL[suitOf(card)]}</div>`;
+    el.dataset.card = card;
+    return el;
+  }
+
+  let state, selectedHand, selectedTable, humanIsThinking, pendingCapture;
+
+  const handEl = document.getElementById("hand");
+  const oppHandEl = document.getElementById("opp-hand");
+  const tableEl = document.getElementById("table");
+  const statusEl = document.getElementById("status");
+  const playBtn = document.getElementById("play-btn");
+  const clearBtn = document.getElementById("clear-btn");
+  const newBtn = document.getElementById("new-btn");
+  const overlay = document.getElementById("overlay");
+  const overlayText = document.getElementById("overlay-text");
+  const overlayBtn = document.getElementById("overlay-btn");
+
+  function setStatus(text) { statusEl.textContent = text; }
+
+  function showOverlay(text, onOk) {
+    overlayText.textContent = text;
+    overlay.hidden = false;
+    overlayBtn.onclick = () => { overlay.hidden = true; if (onOk) onOk(); };
+  }
+
+  function render() {
+    document.getElementById("s0").textContent = score(state)[0];
+    document.getElementById("s1").textContent = score(state)[1];
+
+    oppHandEl.innerHTML = "";
+    state.hands[1].forEach(() => {
+      const back = document.createElement("div");
+      back.className = "card dim";
+      back.innerHTML = "<div>•</div>";
+      oppHandEl.appendChild(back);
+    });
+
+    tableEl.innerHTML = "";
+    state.table.forEach(card => {
+      const selected = selectedTable.includes(card);
+      const el = cardEl(card, selected ? "selected" : "playable");
+      el.onclick = () => onTableClick(card);
+      tableEl.appendChild(el);
+    });
+
+    handEl.innerHTML = "";
+    state.hands[0].forEach(card => {
+      const selected = selectedHand.includes(card);
+      const canAct = state.player === 0 && !humanIsThinking;
+      const el = cardEl(card, selected ? "selected" : (canAct ? "playable" : "dim"));
+      if (canAct) el.onclick = () => onHandClick(card);
+      handEl.appendChild(el);
+    });
+
+    const canPlay = state.player === 0 && selectedHand.length > 0 && !humanIsThinking &&
+      (selectedTable.length > 0
+        ? sum(selectedHand) === sum(selectedTable)
+        : selectedHand.length === 1);
+    playBtn.disabled = !canPlay;
+    clearBtn.disabled = selectedHand.length === 0 && selectedTable.length === 0;
+  }
+
+  function onHandClick(card) {
+    if (state.player !== 0 || humanIsThinking) return;
+    const i = selectedHand.indexOf(card);
+    if (i >= 0) { selectedHand.splice(i, 1); }
+    else { selectedHand.push(card); }
+    selectedTable = [];
+    render();
+  }
+
+  function onTableClick(card) {
+    if (state.player !== 0 || humanIsThinking || !selectedHand.length) return;
+    const i = selectedTable.indexOf(card);
+    if (i >= 0) { selectedTable.splice(i, 1); return render(); }
+    selectedTable.push(card);
+    render();
+  }
+
+  function resetSelection() {
+    selectedHand = [];
+    selectedTable = [];
+    render();
+  }
+
+  function afterMove() {
+    render();
+    if (dealOver(state)) {
+      const pts = score(state);
+      const verdict = pts[0] > pts[1] ? "You win!" : pts[0] < pts[1] ? "Computer wins." : "It's a tie.";
+      setStatus(`Deal over. ${verdict} (${pts[0]} - ${pts[1]})`);
+      return;
+    }
+    if (state.player === 1) {
+      setStatus("Computer is playing...");
+      humanIsThinking = true;
+      render();
+      setTimeout(computerTurn, 550);
+    } else {
+      setStatus("Your move.");
+      humanIsThinking = false;
+      resetSelection();
+    }
+  }
+
+  function computerTurn() {
+    const move = computerChoose(state);
+    state = play(state, move);
+    humanIsThinking = state.player === 1;
+    afterMove();
+  }
+
+  playBtn.onclick = () => {
+    if (state.player !== 0) return;
+    const move = { hand: selectedHand.slice(), table: selectedTable.slice() };
+    try {
+      state = play(state, move);
+    } catch (e) {
+      setStatus("Illegal move: " + e.message);
+      return;
+    }
+    resetSelection();
+    afterMove();
+  };
+
+  clearBtn.onclick = resetSelection;
+
+  function startNewDeal() {
+    const cards = ALL.slice();
+    for (let i = cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+    state = newDeal(cards, 0);
+    humanIsThinking = false;
+    resetSelection();
+    setStatus("Your move.");
+    render();
+  }
+
+  newBtn.onclick = () => {
+    if (!dealOver(state)) {
+      showOverlay("Start a new deal? The current one isn't finished.", startNewDeal);
+    } else {
+      startNewDeal();
+    }
+  };
+
+  startNewDeal();
+})();
+</script>
+</body>
+</html>

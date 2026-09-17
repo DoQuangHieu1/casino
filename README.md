@@ -3,14 +3,15 @@
 The **Hungarian two-player version** of Cassino, with a 52-card French deck —
 in the browser, you against the computer.
 
-There is no code here yet. There are tests.
+## Play
 
-## What to build
+```sh
+uv run python -m webbrowser -t index.html
+```
 
-1. A module `casino` that passes the tests in `tests/`.
-2. A table in the browser where you play a whole deal against the computer.
-   Card images: for example [Byron Knoll's public-domain deck](https://commons.wikimedia.org/wiki/Category:Playing_cards_set_by_Byron_Knoll)
-   on Wikimedia Commons (SVG, all 52 cards).
+(Or just open `index.html` directly in a browser — no server, no build step.)
+Cards are drawn as plain styled rank/suit tiles rather than imported SVGs, to
+keep the page a single self-contained file.
 
 ## Run the tests
 
