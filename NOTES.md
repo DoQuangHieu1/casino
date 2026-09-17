@@ -17,7 +17,11 @@ Asked the agent about it, expecting a bug. Turns out it's correct: most
 captured cards are worth 0 points on their own in this scoring system - only
 Aces, the 10 of Diamonds, the 2 of Spades, sweeps, and the two majority
 bonuses (27+ cards, 7+ spades) score anything. A plain 2 just sits in the
-pile building toward the majority bonus silently. No change made - agent
-offered to add a card-count display alongside the score so progress toward
-the majority bonuses is visible even when points don't move; decided it
-wasn't needed.
+pile building toward the majority bonus silently.
+
+Asked the agent to add a display for progress toward the majority bonuses
+since points alone don't show it. Agent added: cards captured and spades
+captured per player (the two numbers that decide the 27-card and 7-spade
+bonuses), plus how many cards are left in the stock. Score bar now reads
+`You: 0 pts (0 cards, 0♠) | Computer: 0 pts (0 cards, 0♠) | Stock: 42 left`,
+updating live.

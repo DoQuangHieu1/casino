@@ -120,7 +120,13 @@
 </head>
 <body>
   <h1>Cassino</h1>
-  <div id="score">You: <span id="s0">0</span> pts &nbsp;|&nbsp; Computer: <span id="s1">0</span> pts</div>
+  <div id="score">
+    You: <span id="s0">0</span> pts (<span id="c0">0</span> cards, <span id="sp0">0</span>&spades;)
+    &nbsp;|&nbsp;
+    Computer: <span id="s1">0</span> pts (<span id="c1">0</span> cards, <span id="sp1">0</span>&spades;)
+    &nbsp;|&nbsp;
+    Stock: <span id="stock">0</span> left
+  </div>
   <div id="status">Dealing...</div>
 
   <div id="table-area">
@@ -367,8 +373,13 @@
   }
 
   function render() {
-    document.getElementById("s0").textContent = score(state)[0];
-    document.getElementById("s1").textContent = score(state)[1];
+    const pts = score(state);
+    for (const p of [0, 1]) {
+      document.getElementById("s" + p).textContent = pts[p];
+      document.getElementById("c" + p).textContent = state.piles[p].length;
+      document.getElementById("sp" + p).textContent = state.piles[p].filter(c => suitOf(c) === "S").length;
+    }
+    document.getElementById("stock").textContent = state.talon.length;
 
     oppHandEl.innerHTML = "";
     state.hands[1].forEach(() => {
